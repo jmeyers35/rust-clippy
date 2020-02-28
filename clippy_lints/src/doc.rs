@@ -1,4 +1,7 @@
-use crate::utils::{get_trait_def_id, implements_trait, is_entrypoint_fn, match_type, paths, return_ty, span_lint};
+use crate::utils::{
+    get_trait_def_id, implements_trait, is_entrypoint_fn, match_type, paths, return_ty, snippet_opt, span_lint,
+};
+use bytecount::count;
 use if_chain::if_chain;
 use itertools::Itertools;
 use rustc::lint::in_external_macro;
@@ -357,9 +360,9 @@ fn check_attrs<'a>(cx: &LateContext<'_, '_>, valid_idents: &FxHashSet<String>, a
 
         match (previous.0, current.0) {
             (Text(previous), Text(current)) => {
-                let mut previous = previous.to_string();
-                previous.push_str(&current);
-                Ok((Text(previous.into()), previous_range))
+                let text = (previous.to_string() + &current).into();
+                let range = previous_range.start..current_range.end;
+                Ok((Text(text), range))
             },
             (previous, current) => Err(((previous, previous_range), (current, current_range))),
         }
@@ -413,6 +416,12 @@ fn check_doc<'a, Events: Iterator<Item = (pulldown_cmark::Event<'a>, Range<usize
                 };
                 let (begin, span) = spans[index];
                 if in_code {
+                    let lo = span.lo() + BytePos::from_usize(range.start - begin);
+                    let span = Span::new(
+                        lo,
+                        lo + BytePos::from_usize(text.len() + count(text.as_bytes(), b'\n') * 4),
+                        span.ctxt(),
+                    );
                     check_code(cx, &text, span);
                 } else {
                     // Adjust for the beginning of the current `Event`
@@ -429,8 +438,14 @@ fn check_doc<'a, Events: Iterator<Item = (pulldown_cmark::Event<'a>, Range<usize
 static LEAVE_MAIN_PATTERNS: &[&str] = &["static", "fn main() {}", "extern crate", "async fn main() {"];
 
 fn check_code(cx: &LateContext<'_, '_>, text: &str, span: Span) {
-    if text.contains("fn main() {") && !LEAVE_MAIN_PATTERNS.iter().any(|p| text.contains(p)) {
-        span_lint(cx, NEEDLESS_DOCTEST_MAIN, span, "needless `fn main` in doctest");
+    if let Some(comment) = snippet_opt(cx, span) {
+        if let Some(offset) = comment.find("fn main() {") {
+            if !LEAVE_MAIN_PATTERNS.iter().any(|p| text.contains(p)) {
+                let lo = span.lo() + BytePos::from_usize(offset);
+                let span = Span::new(lo, lo + BytePos::from_usize("fn main()".len()), span.ctxt());
+                span_lint(cx, NEEDLESS_DOCTEST_MAIN, span, "needless `fn main` in doctest");
+            }
+        }
     }
 }
 

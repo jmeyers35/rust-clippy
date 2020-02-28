@@ -8,6 +8,17 @@
 ///     unimplemented!();
 /// }
 /// ```
+///
+/// This should also lint, and have correct span
+///
+/// ```
+/// use std::io::Write as _;
+///
+/// fn main() {
+///     let x = String::new();
+///     write!(x, "Hallo");
+/// }
+/// ```
 fn bad_doctest() {}
 
 /// # Examples
